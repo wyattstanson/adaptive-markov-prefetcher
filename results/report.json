@@ -1,0 +1,214 @@
+{
+  "capacity": 100,
+  "length": 20000,
+  "seed": 1234,
+  "workloads": [
+    {
+      "workload": "sequential",
+      "capacity": 100,
+      "length": 20000,
+      "seed": 1234,
+      "results": [
+        {
+          "policy": "LRU",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "CLOCK",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "ARC",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "AMPP",
+          "hit_rate": 0.9749,
+          "fault_rate": 0.0251,
+          "faults": 502,
+          "prefetches": 19499,
+          "prefetch_accuracy": 0.9999,
+          "fault_reduction_vs_lru": 0.9749,
+          "phase_counts": {
+            "warmup": 31,
+            "looping": 119,
+            "sequential": 19850
+          }
+        }
+      ]
+    },
+    {
+      "workload": "random",
+      "capacity": 100,
+      "length": 20000,
+      "seed": 1234,
+      "results": [
+        {
+          "policy": "LRU",
+          "hit_rate": 0.3315,
+          "fault_rate": 0.6685,
+          "faults": 13370,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "CLOCK",
+          "hit_rate": 0.3319,
+          "fault_rate": 0.6681,
+          "faults": 13362,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0006,
+          "phase_counts": {}
+        },
+        {
+          "policy": "ARC",
+          "hit_rate": 0.3331,
+          "fault_rate": 0.6669,
+          "faults": 13338,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0024,
+          "phase_counts": {}
+        },
+        {
+          "policy": "AMPP",
+          "hit_rate": 0.3315,
+          "fault_rate": 0.6685,
+          "faults": 13370,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {
+            "warmup": 31,
+            "random": 19969
+          }
+        }
+      ]
+    },
+    {
+      "workload": "looping",
+      "capacity": 100,
+      "length": 20000,
+      "seed": 1234,
+      "results": [
+        {
+          "policy": "LRU",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "CLOCK",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "ARC",
+          "hit_rate": 0.0,
+          "fault_rate": 1.0,
+          "faults": 20000,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "AMPP",
+          "hit_rate": 0.994,
+          "fault_rate": 0.006,
+          "faults": 120,
+          "prefetches": 3360,
+          "prefetch_accuracy": 1.0,
+          "fault_reduction_vs_lru": 0.994,
+          "phase_counts": {
+            "warmup": 31,
+            "looping": 19969
+          }
+        }
+      ]
+    },
+    {
+      "workload": "mixed",
+      "capacity": 100,
+      "length": 20000,
+      "seed": 1234,
+      "results": [
+        {
+          "policy": "LRU",
+          "hit_rate": 0.0626,
+          "fault_rate": 0.9374,
+          "faults": 18747,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.0,
+          "phase_counts": {}
+        },
+        {
+          "policy": "CLOCK",
+          "hit_rate": 0.0616,
+          "fault_rate": 0.9385,
+          "faults": 18769,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": -0.0012,
+          "phase_counts": {}
+        },
+        {
+          "policy": "ARC",
+          "hit_rate": 0.0635,
+          "fault_rate": 0.9365,
+          "faults": 18729,
+          "prefetches": 0,
+          "prefetch_accuracy": 0.0,
+          "fault_reduction_vs_lru": 0.001,
+          "phase_counts": {}
+        },
+        {
+          "policy": "AMPP",
+          "hit_rate": 0.8252,
+          "fault_rate": 0.1748,
+          "faults": 3496,
+          "prefetches": 11368,
+          "prefetch_accuracy": 0.9945,
+          "fault_reduction_vs_lru": 0.8135,
+          "phase_counts": {
+            "warmup": 31,
+            "looping": 5334,
+            "sequential": 10620,
+            "random": 4015
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,992 @@
+<title>Adaptive Markov Prefetcher</title>
+<meta name="description" content="A phase-aware Markov page prefetcher, run live in 3D against LRU, with benchmark results.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500&family=Onest:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@800&text=ampp&display=swap">
+<!-- three.js r128: the last release that ships a UMD global build (three.min.js).
+     The artifact CSP only admits classic scripts from cdnjs, so this pinned build is used. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  /* Dark-first. Bare :root is the dark palette; light is redefined below for the
+     OS light preference and for the explicit light toggle.
+     Shape system: 8px radius on every panel, button and control; 6px on inner
+     segment buttons; legend swatches are round dots (they mirror the 3D points). */
+  :root {
+    color-scheme: dark;
+    --bg: #0f1011;
+    --panel: #141516;
+    --surface: #17181a;
+    --raise: #1d1e21;
+    --ink: #e8e8e5;
+    --ink-2: #b4b5b1;
+    --muted: #8d8f8b;
+    --line: #26282b;
+    --line-strong: #34363a;
+    --accent: #5596e6;
+    --fault: #e06b5f;
+    --bar-muted: #74777d;
+    --btn-bg: #e8e8e5;
+    --btn-ink: #0f1011;
+    --veil: rgba(15,16,17,0.78);
+    --font: "Onest", "Segoe UI", system-ui, sans-serif;
+    --mono: "Martian Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --mark: "Doto", "Martian Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #f1f2f3;
+      --panel: #f4f5f6;
+      --surface: #fbfbfb;
+      --raise: #ffffff;
+      --ink: #151618;
+      --ink-2: #3c3f44;
+      --muted: #62666c;
+      --line: #dfe1e4;
+      --line-strong: #c9ccd1;
+      --accent: #2f6fb8;
+      --fault: #c2453a;
+      --bar-muted: #8a8e95;
+      --btn-bg: #151618;
+      --btn-ink: #ffffff;
+      --veil: rgba(241,242,243,0.82);
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f1f2f3;
+    --panel: #f4f5f6;
+    --surface: #fbfbfb;
+    --raise: #ffffff;
+    --ink: #151618;
+    --ink-2: #3c3f44;
+    --muted: #62666c;
+    --line: #dfe1e4;
+    --line-strong: #c9ccd1;
+    --accent: #2f6fb8;
+    --fault: #c2453a;
+    --bar-muted: #8a8e95;
+    --btn-bg: #151618;
+    --btn-ink: #ffffff;
+    --veil: rgba(241,242,243,0.82);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 16px/1.55 var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: 100%; max-width: 1240px; margin-inline: auto; padding-inline: 16px; }
+  @media (min-width: 768px) { .wrap { padding-inline: 32px; } }
+  h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.02em; }
+  p { margin: 0; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  .icon { width: 16px; height: 16px; flex: none; }
+
+  /* Navigation */
+  .nav { position: sticky; top: 0; z-index: 10; background: var(--veil);
+    backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    border-bottom: 1px solid var(--line); }
+  .nav-in { height: 60px; display: flex; align-items: center; gap: 20px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; text-decoration: none; }
+  .brand-mark { font-family: var(--mark); font-weight: 800; font-size: 26px; line-height: 1; letter-spacing: 0.02em; }
+  .brand-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .nav-links { margin-left: auto; display: none; gap: 4px; }
+  @media (min-width: 768px) { .nav-links { display: flex; } }
+  .nav-links a { font-size: 14px; color: var(--ink-2); text-decoration: none; padding: 6px 12px; border-radius: 8px; }
+  .nav-links a:hover { color: var(--ink); background: var(--raise); }
+  .theme-btn { margin-left: auto; width: 36px; height: 36px; display: grid; place-items: center;
+    background: transparent; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 8px; cursor: pointer; }
+  @media (min-width: 768px) { .theme-btn { margin-left: 8px; } }
+  .theme-btn:hover { color: var(--ink); background: var(--raise); }
+
+  /* Hero: text left, live simulation right */
+  .hero { padding-block: 40px 24px; display: grid; gap: 32px; align-items: center; }
+  @media (min-width: 1024px) { .hero { grid-template-columns: 6fr 7fr; gap: 48px; padding-block: 56px 32px; } }
+  .hero-copy { display: grid; gap: 20px; max-width: 34rem; }
+  .hero h1 { font-size: clamp(34px, 3.5vw, 46px); line-height: 1.06; letter-spacing: -0.035em; }
+  .hero-sub { font-size: 18px; color: var(--ink-2); max-width: 30rem; }
+  .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding-inline: 18px;
+    font: 500 15px/1 var(--font); border-radius: 8px; cursor: pointer; text-decoration: none; white-space: nowrap;
+    border: 1px solid transparent; transition: background-color .2s ease, transform .1s ease; }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--btn-bg); color: var(--btn-ink); }
+  .btn-primary:hover { background: color-mix(in srgb, var(--btn-bg) 86%, var(--accent)); }
+  .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+  .btn-ghost:hover { background: var(--raise); }
+
+  .rise { animation: rise .7s cubic-bezier(.16,1,.3,1) both; }
+  .rise:nth-child(2) { animation-delay: .06s; }
+  .rise:nth-child(3) { animation-delay: .12s; }
+  @keyframes rise { from { opacity: .4; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+  /* Simulation panel */
+  .sim { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .sim-stage { position: relative; }
+  #cv3d { display: block; width: 100%; height: clamp(360px, 62vh, 560px); cursor: grab; touch-action: none; }
+  #cv3d.dragging { cursor: grabbing; }
+  .hud-l, .hud-r { position: absolute; top: 16px; pointer-events: none; }
+  .hud-l { left: 16px; display: grid; gap: 6px; }
+  .hud-r { right: 16px; text-align: right; }
+  .kv { font-family: var(--mono); font-size: 11px; color: var(--muted); display: flex; gap: 10px; }
+  .kv b { color: var(--ink); font-weight: 500; }
+  .live-rate { font-size: 40px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; }
+  .live-rate small { font-size: 18px; color: var(--muted); font-weight: 500; }
+  .live-cap { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .sim-bar { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; padding: 12px 16px;
+    border-top: 1px solid var(--line); background: var(--surface); }
+  .icon-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px;
+    border: 1px solid var(--line-strong); background: var(--raise); color: var(--ink); cursor: pointer; }
+  .icon-btn:hover { border-color: var(--muted); }
+  .icon-btn:active { transform: translateY(1px); }
+  .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+  .seg button { font: 500 13px/1 var(--font); color: var(--muted); background: transparent; border: 0;
+    padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+  .seg button:hover { color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--raise); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .speed { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .speed input { accent-color: var(--accent); width: 96px; }
+  .speed output { min-width: 2ch; color: var(--ink); }
+  .legend { margin-left: auto; display: flex; gap: 14px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 8px; height: 8px; border-radius: 50%; }
+  .sw-hit { background: var(--ink); }
+  .sw-fault { background: var(--fault); }
+  .sw-pf { background: var(--accent); }
+  .stream { display: flex; align-items: center; gap: 10px; margin-top: 12px; overflow: hidden; }
+  .stream-label { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: none; }
+  .chips { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+  .chip { flex: none; font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink);
+    padding: 5px 6px; border-radius: 6px; border: 1px solid var(--line-strong); }
+  .chip.fault { background: color-mix(in srgb, var(--fault) 24%, transparent); border-color: transparent; }
+  .chip.pf { background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: transparent; }
+  .fallback { padding: 48px 24px; color: var(--ink-2); max-width: 46ch; }
+
+  section { padding-block: 72px; }
+  @media (min-width: 1024px) { section { padding-block: 96px; } }
+  .sec-head { display: grid; gap: 10px; margin-bottom: 40px; max-width: 46rem; }
+  .sec-head h2 { font-size: clamp(28px, 3.2vw, 40px); line-height: 1.1; letter-spacing: -0.03em; }
+  .sec-head p { color: var(--ink-2); max-width: 62ch; }
+
+  /* Summary band: four workloads, hairlines between columns only */
+  .band { display: grid; grid-template-columns: 1fr; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  @media (min-width: 640px) { .band { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .band { grid-template-columns: repeat(4, 1fr); } }
+  .stat { padding: 28px 24px 28px 0; display: grid; gap: 8px; align-content: start; }
+  .stat + .stat { border-top: 1px solid var(--line); }
+  @media (min-width: 640px) {
+    .stat + .stat { border-top: 0; }
+    .stat:nth-child(even) { padding-left: 24px; border-left: 1px solid var(--line); }
+    .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+  }
+  @media (min-width: 1024px) {
+    .stat:nth-child(n) { padding-left: 24px; border-top: 0; }
+    .stat:first-child { padding-left: 0; }
+    .stat + .stat { border-left: 1px solid var(--line); }
+  }
+  .stat-label { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .stat-value { font-size: 52px; font-weight: 600; line-height: 1; letter-spacing: -0.04em; }
+  .stat-value small { font-size: 22px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .stat-cap { font-size: 14px; color: var(--ink-2); max-width: 26ch; }
+
+  /* Method: signal path */
+  .rail { position: relative; display: grid; gap: 28px; }
+  @media (min-width: 1024px) { .rail { grid-template-columns: repeat(5, 1fr); gap: 0; } }
+  .node { position: relative; display: grid; gap: 8px; padding-left: 28px; }
+  .node::before { content: ""; position: absolute; left: 0; top: 4px; width: 9px; height: 9px; border-radius: 2px;
+    background: var(--ink); box-shadow: 0 0 0 4px var(--bg); z-index: 1; }
+  .node::after { content: ""; position: absolute; left: 4px; top: 8px; bottom: -36px; width: 1px; background: var(--line-strong); }
+  .node:last-child::after { display: none; }
+  @media (min-width: 1024px) {
+    .node { padding: 32px 24px 0 0; }
+    .node::before { top: 0; }
+    .node::after { left: 9px; right: 0; top: 4px; bottom: auto; width: auto; height: 1px; }
+  }
+  .node.accent::before { background: var(--accent); }
+  .node-name { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .node-desc { font-size: 14px; color: var(--ink-2); max-width: 24ch; }
+  .loop-note { margin-top: 32px; font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+  .loop-note::before { content: ""; width: 32px; height: 1px; background: var(--accent); }
+
+  .specimen { margin-top: 56px; display: grid; gap: 24px; padding-top: 32px; border-top: 1px solid var(--line); }
+  @media (min-width: 1024px) { .specimen { grid-template-columns: 4fr 8fr; gap: 48px; } }
+  .specimen h3 { font-size: 22px; letter-spacing: -0.02em; }
+  .specimen p { color: var(--ink-2); margin-top: 10px; max-width: 40ch; }
+  .seqs { display: grid; gap: 14px; font-family: var(--mono); font-size: 13px; }
+  .seq { display: grid; grid-template-columns: 76px 1fr; gap: 16px; align-items: center; }
+  .seq-k { color: var(--muted); font-size: 11px; }
+  .seq-v { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tok { min-width: 28px; height: 28px; padding-inline: 8px; display: inline-grid; place-items: center;
+    border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+  .tok.hl { border-color: var(--accent); color: var(--accent); }
+  .tok.bad { border-style: dashed; color: var(--muted); }
+  .arrow-t { color: var(--muted); }
+  .seq-note { color: var(--muted); font-size: 11px; margin-left: 8px; }
+
+  /* Phase map */
+  .phase-wrap { display: grid; gap: 40px; }
+  @media (min-width: 1024px) { .phase-wrap { grid-template-columns: 5fr 7fr; gap: 64px; align-items: start; } }
+  .phase-wrap .sec-head { margin-bottom: 0; }
+  .pmap { display: grid; gap: 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+  .prow { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 20px 0; }
+  .prow + .prow { border-top: 1px solid var(--line); }
+  @media (min-width: 640px) { .prow { grid-template-columns: 7rem 1fr 5rem 6rem; gap: 16px; align-items: baseline; } }
+  .prow.head { padding: 12px 0; font-family: var(--mono); font-size: 11px; color: var(--muted); display: none; }
+  @media (min-width: 640px) { .prow.head { display: grid; } }
+  .p-name { font-weight: 600; }
+  .p-sig { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+  .p-ev { font-family: var(--mono); font-size: 13px; }
+  .p-pf { font-family: var(--mono); font-size: 13px; }
+  .p-pf.off { color: var(--muted); }
+
+  /* Results chart */
+  .results { display: grid; gap: 40px; }
+  @media (min-width: 1024px) { .results { grid-template-columns: 8fr 4fr; gap: 56px; } }
+  .filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  .view-btn { margin-left: auto; font: 500 13px/1 var(--font); color: var(--ink-2); background: none;
+    border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+  .view-btn:hover { color: var(--ink); background: var(--raise); }
+  .chart { position: relative; }
+  .plot { position: relative; display: grid; gap: 4px; }
+  .grid-lines { position: absolute; inset: 0 56px 0 72px; pointer-events: none; }
+  .grid-lines i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+  .brow { position: relative; display: grid; grid-template-columns: 72px 1fr 56px; align-items: center; height: 44px; cursor: default; }
+  .brow:focus-visible { outline-offset: -2px; }
+  .b-name { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+  .b-track { position: relative; height: 100%; display: flex; align-items: center; }
+  .b-bar { height: 20px; width: 100%; transform-origin: left center; transform: scaleX(0);
+    background: var(--bar-muted); border-radius: 0 4px 4px 0; transition: transform .7s cubic-bezier(.16,1,.3,1); }
+  .brow.ours .b-bar { background: var(--accent); }
+  .brow.ours .b-name { color: var(--ink); font-weight: 500; }
+  .brow:hover .b-bar, .brow:focus-visible .b-bar { filter: brightness(1.12); }
+  .b-val { position: absolute; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 12px;
+    font-variant-numeric: tabular-nums; color: var(--ink); padding-left: 8px; white-space: nowrap; transition: left .7s cubic-bezier(.16,1,.3,1); }
+  .axis { display: grid; grid-template-columns: 72px 1fr 56px; margin-top: 8px; }
+  .ticks { position: relative; height: 16px; font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ticks span { position: absolute; transform: translateX(-50%); }
+  .ticks span:first-child { transform: none; }
+  .ticks span:last-child { transform: translateX(-100%); }
+  .axis-title { grid-column: 2; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .tip { position: absolute; z-index: 5; pointer-events: none; background: var(--raise); border: 1px solid var(--line-strong);
+    border-radius: 8px; padding: 10px 12px; min-width: 150px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .tip-v { font-size: 18px; font-weight: 600; }
+  .tip-k { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .tip-k i { width: 12px; height: 2px; display: inline-block; }
+  table.tv { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.tv th { text-align: left; font: 400 11px/1.4 var(--mono); color: var(--muted); padding: 0 12px 10px 0; }
+  table.tv td { padding: 12px 12px 12px 0; font-variant-numeric: tabular-nums; }
+  table.tv tbody tr + tr td { border-top: 1px solid var(--line); }
+  table.tv td:first-child { font-family: var(--mono); font-size: 12px; }
+  .facts { display: grid; gap: 28px; align-content: start; padding-top: 4px; }
+  @media (min-width: 1024px) { .facts { padding-top: 76px; } }
+  .fact { display: grid; gap: 6px; }
+  .fact-k { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .fact-v { font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; }
+  .fact-c { font-size: 14px; color: var(--ink-2); max-width: 30ch; }
+  .honest { margin-top: 32px; max-width: 64ch; color: var(--ink-2); }
+  .honest strong { color: var(--ink); font-weight: 600; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 28px 40px; }
+  .foot { display: flex; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; font-size: 14px; color: var(--ink-2); }
+  .foot code { font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rise { animation: none; }
+    .b-bar, .b-val { transition: none; }
+  }
+</style>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="AMPP, adaptive Markov page prefetcher">
+      <span class="brand-mark">ampp</span>
+      <span class="brand-sub">page prefetcher</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#top">Simulation</a>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+    </nav>
+    <button class="theme-btn" id="theme" type="button" aria-label="Switch colour theme">
+      <svg class="icon" id="theme-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <div class="hero-copy">
+      <h1 class="rise">Fetch the next page before it faults.</h1>
+      <p class="hero-sub rise">An order-2 Markov prefetcher that reads the workload phase, then picks how to evict and when to fetch ahead.</p>
+      <div class="ctas rise">
+        <button class="btn btn-primary" id="compare" type="button" aria-pressed="false">Compare with LRU</button>
+        <a class="btn btn-ghost" href="#results">
+          Results
+          <svg class="icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M205.66,149.66l-72,72a8,8,0,0,1-11.32,0l-72-72a8,8,0,0,1,11.32-11.32L120,196.69V40a8,8,0,0,1,16,0V196.69l58.34-58.35a8,8,0,0,1,11.32,11.32Z"/></svg>
+        </a>
+      </div>
+    </div>
+
+    <div>
+      <div class="sim">
+        <div class="sim-stage">
+          <canvas id="cv3d" aria-label="Live 3D view of 100 cache frames running the selected policy"></canvas>
+          <div class="hud-l" id="hud-l">
+            <div class="kv"><span>policy</span><b id="h-policy">AMPP</b></div>
+            <div class="kv"><span>workload</span><b id="h-wl">looping</b></div>
+            <div class="kv"><span>prefetch</span><b id="h-pf">on</b></div>
+          </div>
+          <div class="hud-r" id="hud-r" aria-live="polite">
+            <div class="live-rate"><span id="h-rate">0.0</span><small>%</small></div>
+            <div class="live-cap"><span id="h-fault">0</span> faults in <span id="h-acc">0</span> accesses</div>
+          </div>
+          <p class="fallback" id="fallback" hidden>This view needs WebGL, which is unavailable here. The results below tell the same story: on looping and scanning workloads AMPP turns LRU's 0% hit rate into 97 to 99%.</p>
+        </div>
+        <div class="sim-bar">
+          <button class="icon-btn" id="play" type="button" aria-label="Pause simulation">
+            <svg class="icon" id="play-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"></svg>
+          </button>
+          <div class="seg" id="seg-wl" role="group" aria-label="Workload">
+            <button type="button" data-wl="loop" aria-pressed="true">Loop</button>
+            <button type="button" data-wl="scan" aria-pressed="false">Scan</button>
+            <button type="button" data-wl="random" aria-pressed="false">Random</button>
+          </div>
+          <label class="speed">speed <input id="speed" type="range" min="1" max="8" step="1" value="3"><output id="speed-out">3x</output></label>
+          <div class="legend" aria-label="Legend">
+            <span><i class="sw sw-hit"></i>hit</span>
+            <span><i class="sw sw-fault"></i>fault</span>
+            <span><i class="sw sw-pf"></i>prefetch</span>
+          </div>
+        </div>
+      </div>
+      <div class="stream" aria-hidden="true">
+        <span class="stream-label">stream</span>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+  </div>
+
+  <section class="wrap" aria-labelledby="sum-h">
+    <div class="sec-head">
+      <h2 id="sum-h">Fewer page faults than LRU</h2>
+      <p>100 frames, 20,000 accesses per trace. Every policy sees the identical trace, cache size and seed.</p>
+    </div>
+    <div class="band">
+      <div class="stat">
+        <div class="stat-label">Looping</div>
+        <div class="stat-value">99.4<small>%</small></div>
+        <div class="stat-cap">A 120-page loop on 100 frames, the case where LRU evicts the next page every time.</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Sequential scan</div>
+        <div class="stat-value">97.5<small>%</small></div>
+        <div class="stat-cap">A repeating 500-page scan. Only the first pass faults while the model learns.</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Mixed phases</div>
+        <div class="stat-value">81.3<small>%</small></div>
+        <div class="stat-cap">Scan, loop and random segments interleaved. The random fifth has nothing to learn.</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Random</div>
+        <div class="stat-value">0.0<small>%</small></div>
+        <div class="stat-cap">Uniform access has no structure to learn, so AMPP matches LRU and claims no gain.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="method" aria-labelledby="method-h">
+    <div class="sec-head">
+      <h2 id="method-h">Four stages, one pass per access</h2>
+      <p>Each stage sits behind its own interface, so any of them can be inspected or swapped without touching the others.</p>
+    </div>
+    <div class="rail">
+      <div class="node"><div class="node-name">trace</div><div class="node-desc">A seeded reference stream, generated or replayed.</div></div>
+      <div class="node accent"><div class="node-name">order-2 markov</div><div class="node-desc">Learns which page follows each pair of pages.</div></div>
+      <div class="node"><div class="node-name">phase detector</div><div class="node-desc">Labels the stream as scan, loop or random from window statistics.</div></div>
+      <div class="node"><div class="node-name">policy engine</div><div class="node-desc">Chooses the eviction rule and whether to prefetch.</div></div>
+      <div class="node"><div class="node-name">page cache</div><div class="node-desc">100 frames that count hits, faults and prefetches.</div></div>
+    </div>
+    <div class="loop-note">every access feeds its transition back into the model</div>
+
+    <div class="specimen">
+      <div>
+        <h3>Why two pages of context</h3>
+        <p>A first-order model sees only the last page. When two paths share a middle page, it can predict only one of their successors.</p>
+      </div>
+      <div class="seqs" aria-label="Order-1 versus order-2 prediction example">
+        <div class="seq"><span class="seq-k">order-1</span>
+          <div class="seq-v"><span class="tok">B</span><span class="arrow-t">to</span><span class="tok bad">D or E</span><span class="seq-note">one guess for two futures</span></div></div>
+        <div class="seq"><span class="seq-k">order-2</span>
+          <div class="seq-v"><span class="tok">A</span><span class="tok">B</span><span class="arrow-t">to</span><span class="tok hl">D</span><span class="seq-note">p = 0.9</span></div></div>
+        <div class="seq"><span class="seq-k">order-2</span>
+          <div class="seq-v"><span class="tok">C</span><span class="tok">B</span><span class="arrow-t">to</span><span class="tok hl">E</span><span class="seq-note">p = 0.7</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="phase-h">
+    <div class="phase-wrap">
+      <div class="sec-head">
+        <h2 id="phase-h">Read the phase, then pick the rule</h2>
+        <p>Prefetching during a random phase evicts useful pages for guesses that will not hit, so the engine turns it off there.</p>
+      </div>
+      <div class="pmap" role="table" aria-label="Phase to policy mapping">
+        <div class="prow head" role="row"><span role="columnheader">phase</span><span role="columnheader">signal</span><span role="columnheader">evict</span><span role="columnheader">prefetch</span></div>
+        <div class="prow" role="row"><span class="p-name" role="cell">Sequential</span><span class="p-sig" role="cell">stride +1, growing footprint</span><span class="p-ev" role="cell">FIFO</span><span class="p-pf" role="cell">4 ahead</span></div>
+        <div class="prow" role="row"><span class="p-name" role="cell">Looping</span><span class="p-sig" role="cell">stride +1, footprint under 1.5x cache</span><span class="p-ev" role="cell">MRU</span><span class="p-pf" role="cell">2 ahead</span></div>
+        <div class="prow" role="row"><span class="p-name" role="cell">Random</span><span class="p-sig" role="cell">many distinct pages, little revisit</span><span class="p-ev" role="cell">LRU</span><span class="p-pf off" role="cell">off</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="results" aria-labelledby="res-h">
+    <div class="sec-head">
+      <h2 id="res-h">Hit rate by policy</h2>
+      <p>LRU, CLOCK and full ARC against AMPP on the same traces.</p>
+    </div>
+    <div class="results">
+      <div>
+        <div class="filters">
+          <div class="seg" id="seg-res" role="group" aria-label="Workload">
+            <button type="button" data-wl="looping" aria-pressed="true">Looping</button>
+            <button type="button" data-wl="sequential" aria-pressed="false">Sequential</button>
+            <button type="button" data-wl="mixed" aria-pressed="false">Mixed</button>
+            <button type="button" data-wl="random" aria-pressed="false">Random</button>
+          </div>
+          <button class="view-btn" id="view" type="button" aria-pressed="false">View as table</button>
+        </div>
+        <div class="chart" id="chart">
+          <div class="plot" id="plot">
+            <div class="grid-lines" aria-hidden="true"><i style="left:0%"></i><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+          </div>
+          <div class="axis" aria-hidden="true">
+            <span></span>
+            <div class="ticks"><span style="left:0%">0</span><span style="left:25%">25</span><span style="left:50%">50</span><span style="left:75%">75</span><span style="left:100%">100</span></div>
+            <div class="axis-title">hit rate, %</div>
+          </div>
+          <div class="tip" id="tip" hidden><div class="tip-v" id="tip-v"></div><div class="tip-k"><i id="tip-key"></i><span id="tip-k"></span></div></div>
+        </div>
+        <div id="table" hidden></div>
+      </div>
+      <div class="facts" id="facts"></div>
+    </div>
+    <p class="honest"><strong>The random row is the honesty check.</strong> Uniform access carries no pattern, every policy lands near 33% (100 frames over 300 pages), and AMPP switches prefetching off rather than guessing.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>Aryansh, Sreevatsa and Maheep. Operating Systems, Project Review 1.</span>
+    <span>Reproduce with <code>python -m ampp</code></span>
+  </div>
+</footer>
+
+<script>
+  /* Official Phosphor Icons 2.1.1 glyphs (MIT), inlined because the artifact CSP blocks icon fonts. */
+  const ICONS = {
+    sun: '<path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/>',
+    moon: '<path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/>',
+    play: '<path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z"/>',
+    pause: '<path d="M216,48V208a16,16,0,0,1-16,16H160a16,16,0,0,1-16-16V48a16,16,0,0,1,16-16h40A16,16,0,0,1,216,48ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Z"/>',
+  };
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const lightMQ = window.matchMedia("(prefers-color-scheme: light)");
+
+  /* ---------------- Theme ---------------- */
+  let onThemeChange = null;
+  function isLight() {
+    const t = document.documentElement.getAttribute("data-theme");
+    return t ? t === "light" : lightMQ.matches;
+  }
+  function paintThemeIcon() {
+    document.getElementById("theme-icon").innerHTML = isLight() ? ICONS.moon : ICONS.sun;
+    document.getElementById("theme").setAttribute("aria-label", isLight() ? "Switch to dark theme" : "Switch to light theme");
+  }
+  document.getElementById("theme").addEventListener("click", () => {
+    document.documentElement.setAttribute("data-theme", isLight() ? "dark" : "light");
+    paintThemeIcon();
+    if (onThemeChange) onThemeChange();
+  });
+  lightMQ.addEventListener("change", () => {
+    if (!document.documentElement.getAttribute("data-theme")) { paintThemeIcon(); if (onThemeChange) onThemeChange(); }
+  });
+  paintThemeIcon();
+
+  /* ---------------- Results chart (from `python -m ampp`, seed 1234) ---------------- */
+  const RESULTS = {
+    looping:    { LRU: [0.0, 20000], CLOCK: [0.0, 20000], ARC: [0.0, 20000], AMPP: [99.4, 120],  pacc: 100.0 },
+    sequential: { LRU: [0.0, 20000], CLOCK: [0.0, 20000], ARC: [0.0, 20000], AMPP: [97.5, 502],  pacc: 99.9 },
+    mixed:      { LRU: [6.3, 18747], CLOCK: [6.2, 18769], ARC: [6.3, 18729], AMPP: [82.5, 3496], pacc: 99.5 },
+    random:     { LRU: [33.1, 13370], CLOCK: [33.2, 13362], ARC: [33.3, 13338], AMPP: [33.1, 13370], pacc: null },
+  };
+  const POLICIES = ["LRU", "CLOCK", "ARC", "AMPP"];
+  const fmt = (n) => n.toLocaleString("en-US");
+  let resWl = "looping";
+
+  const plot = document.getElementById("plot");
+  const tip = document.getElementById("tip");
+  const rows = {};
+  POLICIES.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "brow" + (p === "AMPP" ? " ours" : "");
+    row.tabIndex = 0;
+    const name = document.createElement("span"); name.className = "b-name"; name.textContent = p;
+    const track = document.createElement("div"); track.className = "b-track";
+    const bar = document.createElement("div"); bar.className = "b-bar";
+    const val = document.createElement("span"); val.className = "b-val";
+    track.append(bar, val); row.append(name, track); plot.appendChild(row);
+    rows[p] = { row, bar, val };
+    const show = () => showTip(p);
+    row.addEventListener("pointerenter", show);
+    row.addEventListener("focus", show);
+    row.addEventListener("pointerleave", () => { tip.hidden = true; });
+    row.addEventListener("blur", () => { tip.hidden = true; });
+  });
+
+  function showTip(p) {
+    const [hit, faults] = RESULTS[resWl][p];
+    document.getElementById("tip-v").textContent = hit.toFixed(1) + "% hit rate";
+    document.getElementById("tip-k").textContent = p + ", " + fmt(faults) + " faults";
+    document.getElementById("tip-key").style.background = p === "AMPP" ? "var(--accent)" : "var(--bar-muted)";
+    const r = rows[p].row;
+    tip.hidden = false;
+    const left = Math.min(72 + (hit / 100) * (r.clientWidth - 128) + 12, r.clientWidth - tip.offsetWidth);
+    tip.style.left = Math.max(72, left) + "px";
+    tip.style.top = (r.offsetTop - tip.offsetHeight - 6) + "px";
+  }
+
+  function renderResults() {
+    const d = RESULTS[resWl];
+    POLICIES.forEach((p) => {
+      const [hit, faults] = d[p];
+      const { row, bar, val } = rows[p];
+      bar.style.transform = "scaleX(" + (hit / 100) + ")";
+      val.style.left = hit + "%";
+      val.textContent = hit.toFixed(1) + "%";
+      row.setAttribute("aria-label", p + ": " + hit.toFixed(1) + " percent hit rate, " + fmt(faults) + " faults");
+    });
+
+    // Table twin
+    const t = document.createElement("table"); t.className = "tv";
+    const head = t.createTHead().insertRow();
+    ["Policy", "Hit rate", "Faults", "Fewer faults than LRU"].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+    const body = t.createTBody();
+    const lruF = d.LRU[1];
+    POLICIES.forEach((p) => {
+      const tr = body.insertRow();
+      const red = p === "LRU" ? "baseline" : (((lruF - d[p][1]) / lruF) * 100).toFixed(1) + "%";
+      [p, d[p][0].toFixed(1) + "%", fmt(d[p][1]), red].forEach((v) => { tr.insertCell().textContent = v; });
+    });
+    const holder = document.getElementById("table"); holder.replaceChildren(t);
+
+    // Facts
+    const amppF = d.AMPP[1];
+    const facts = [
+      { k: "AMPP faults", v: fmt(amppF), c: "against " + fmt(lruF) + " for LRU on the same trace" },
+      { k: "Fewer faults than LRU", v: (((lruF - amppF) / lruF) * 100).toFixed(1) + "%", c: "on the same 20,000-access trace" },
+      d.pacc === null
+        ? { k: "Prefetch accuracy", v: "off", c: "prefetch suppressed, there is nothing to learn" }
+        : { k: "Prefetch accuracy", v: d.pacc.toFixed(1) + "%", c: "prefetched pages that were later demanded" },
+    ];
+    const box = document.getElementById("facts"); box.replaceChildren();
+    facts.forEach((f) => {
+      const el = document.createElement("div"); el.className = "fact";
+      const k = document.createElement("div"); k.className = "fact-k"; k.textContent = f.k;
+      const v = document.createElement("div"); v.className = "fact-v"; v.textContent = f.v;
+      const c = document.createElement("div"); c.className = "fact-c"; c.textContent = f.c;
+      el.append(k, v, c); box.appendChild(el);
+    });
+  }
+
+  document.getElementById("seg-res").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    resWl = b.dataset.wl;
+    document.querySelectorAll("#seg-res button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    tip.hidden = true;
+    renderResults();
+  });
+  document.getElementById("view").addEventListener("click", (e) => {
+    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(on));
+    e.currentTarget.textContent = on ? "View as chart" : "View as table";
+    document.getElementById("chart").hidden = on;
+    document.getElementById("table").hidden = !on;
+  });
+  renderResults();
+</script>
+
+<script>
+  /* ================================================================
+     Live simulation. This runs the real policy logic: LRU, and AMPP's
+     phase-gated order-2 prefetch with per-phase eviction (FIFO on scans,
+     MRU on loops, LRU on random). The colours are the policy's actual
+     hits, faults and prefetches, not a scripted animation.
+     ================================================================ */
+  const CAP = 100;
+  const WL = { loop: { fp: 120, label: "looping" }, scan: { fp: 500, label: "sequential" }, random: { fp: 300, label: "random" } };
+
+  function makeLCG(seed) {
+    let s = (seed >>> 0) || 1;
+    return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s; };
+  }
+  function evictRule(policy, kind) {
+    if (policy === "LRU") return "lru";
+    return kind === "scan" ? "fifo" : kind === "loop" ? "mru" : "lru";
+  }
+  // The successor an order-2 model learns for scans and loops; random has none.
+  function predictNext(kind, page, fp) { return kind === "random" ? null : (page + 1) % fp; }
+
+  class Cache {
+    constructor(cap) {
+      this.cap = cap; this.tick = 0; this.map = new Map();
+      this.frames = Array.from({ length: cap }, () => ({ page: -1, last: -1, ins: -1, pf: false }));
+      this.resetCounters();
+    }
+    resetCounters() { this.accesses = 0; this.hits = 0; this.faults = 0; this.prefetches = 0; this.prefetchHits = 0; }
+    freeFrame() { for (let i = 0; i < this.cap; i++) if (this.frames[i].page === -1) return i; return -1; }
+    victim(rule, protect) {
+      let best = -1, bestKey = 0;
+      for (let i = 0; i < this.cap; i++) {
+        const f = this.frames[i];
+        if (f.page === -1 || protect.has(i)) continue;
+        const key = rule === "fifo" ? f.ins : rule === "mru" ? -f.last : f.last;
+        if (best === -1 || key < bestKey) { best = i; bestKey = key; }
+      }
+      return best;
+    }
+    place(page, idx, isPrefetch) {
+      const f = this.frames[idx];
+      if (f.page !== -1) this.map.delete(f.page);
+      f.page = page; f.last = this.tick; f.ins = this.tick; f.pf = isPrefetch;
+      this.map.set(page, idx);
+    }
+    step(page, policy, kind, fp) {
+      this.tick++; this.accesses++;
+      const rule = evictRule(policy, kind);
+      let demand, outcome, servedByPrefetch = false;
+      if (this.map.has(page)) {
+        outcome = "hit"; this.hits++;
+        demand = this.map.get(page);
+        const f = this.frames[demand];
+        if (f.pf) { this.prefetchHits++; f.pf = false; servedByPrefetch = true; }
+        f.last = this.tick;
+      } else {
+        outcome = "fault"; this.faults++;
+        let idx = this.freeFrame();
+        if (idx === -1) idx = this.victim(rule, new Set());
+        this.place(page, idx, false);
+        demand = idx;
+      }
+      const prefetched = [];
+      if (policy === "AMPP" && kind !== "random") {
+        const degree = kind === "scan" ? 3 : 1;
+        const protect = new Set([demand]);
+        let pg = page;
+        for (let d = 0; d < degree; d++) {
+          const np = predictNext(kind, pg, fp);
+          if (np === null) break;
+          pg = np;
+          if (this.map.has(np)) continue;
+          let idx = this.freeFrame();
+          if (idx === -1) idx = this.victim(rule, protect);
+          if (idx === -1) break;
+          this.place(np, idx, true);
+          this.prefetches++; protect.add(idx); prefetched.push(idx);
+        }
+      }
+      return { outcome, demand, prefetched, servedByPrefetch };
+    }
+  }
+
+  (function simulation() {
+    const canvas = document.getElementById("cv3d");
+    let gl = null;
+    // preserveDrawingBuffer keeps the last frame readable, so link previews and gallery thumbnails show the grid.
+    const attrs = { alpha: true, antialias: true, preserveDrawingBuffer: true };
+    try { gl = window.THREE && (canvas.getContext("webgl", attrs) || canvas.getContext("experimental-webgl", attrs)); } catch (e) { gl = null; }
+    if (!gl) {
+      canvas.hidden = true;
+      document.getElementById("hud-l").hidden = true;
+      document.getElementById("hud-r").hidden = true;
+      document.getElementById("fallback").hidden = false;
+      return;
+    }
+
+    const GRID = 10, GAP = 1.0, DOTS = 4, LAYERS = 8, PITCH = 0.15;
+    const PER_FRAME = DOTS * DOTS * LAYERS;
+    const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const col = (n) => new THREE.Color(css(n));
+
+    const renderer = new THREE.WebGLRenderer({ canvas, context: gl, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(36, 1.4, 0.1, 100);
+
+    const vertexShader = `
+      attribute vec3 aColor;
+      attribute float aAlpha;
+      uniform float uSize;
+      uniform float uScale;
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float d = -mv.z;
+        vColor = aColor;
+        vAlpha = aAlpha * (1.0 - smoothstep(16.0, 30.0, d));
+        gl_PointSize = uSize * uScale / d;
+        gl_Position = projectionMatrix * mv;
+      }`;
+    const fragmentShader = `
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float r = length(gl_PointCoord - 0.5);
+        if (r > 0.5) discard;
+        float a = vAlpha * (1.0 - smoothstep(0.3, 0.5, r));
+        if (a < 0.01) discard;
+        gl_FragColor = vec4(vColor, a);
+      }`;
+    function dotMaterial(size) {
+      return new THREE.ShaderMaterial({
+        uniforms: { uSize: { value: size }, uScale: { value: 400 } },
+        vertexShader, fragmentShader, transparent: true, depthWrite: false,
+      });
+    }
+
+    // Frame pillars: each frame is a 4x4 dot matrix, 8 layers tall.
+    const n = CAP * PER_FRAME;
+    const pos = new Float32Array(n * 3), colr = new Float32Array(n * 3), alph = new Float32Array(n);
+    let k = 0;
+    for (let f = 0; f < CAP; f++) {
+      const cx = ((f % GRID) - (GRID - 1) / 2) * GAP;
+      const cz = (Math.floor(f / GRID) - (GRID - 1) / 2) * GAP;
+      for (let l = 0; l < LAYERS; l++)
+        for (let i = 0; i < DOTS; i++)
+          for (let j = 0; j < DOTS; j++) {
+            pos[k * 3] = cx + (i - (DOTS - 1) / 2) * PITCH;
+            pos[k * 3 + 1] = l * PITCH;
+            pos[k * 3 + 2] = cz + (j - (DOTS - 1) / 2) * PITCH;
+            k++;
+          }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const aColor = new THREE.BufferAttribute(colr, 3); aColor.setUsage(THREE.DynamicDrawUsage);
+    const aAlpha = new THREE.BufferAttribute(alph, 1); aAlpha.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("aColor", aColor); geo.setAttribute("aAlpha", aAlpha);
+    const frameMat = dotMaterial(0.075);
+    scene.add(new THREE.Points(geo, frameMat));
+
+    // Floor: a faint dot field that gives the grid a ground plane.
+    const FS = 46, FP = 0.5;
+    const fpos = new Float32Array(FS * FS * 3), fcol = new Float32Array(FS * FS * 3), falp = new Float32Array(FS * FS);
+    for (let i = 0, q = 0; i < FS; i++) for (let j = 0; j < FS; j++, q++) {
+      fpos[q * 3] = (i - (FS - 1) / 2) * FP + FP / 2;
+      fpos[q * 3 + 1] = -0.06;
+      fpos[q * 3 + 2] = (j - (FS - 1) / 2) * FP + FP / 2;
+      falp[q] = 0.5;
+    }
+    const fgeo = new THREE.BufferGeometry();
+    fgeo.setAttribute("position", new THREE.BufferAttribute(fpos, 3));
+    const fColor = new THREE.BufferAttribute(fcol, 3);
+    fgeo.setAttribute("aColor", fColor); fgeo.setAttribute("aAlpha", new THREE.BufferAttribute(falp, 1));
+    const floorMat = dotMaterial(0.045);
+    scene.add(new THREE.Points(fgeo, floorMat));
+
+    const PAL = {};
+    function refreshPalette() {
+      PAL.ink = col("--ink"); PAL.ink2 = col("--ink-2"); PAL.muted = col("--muted");
+      PAL.accent = col("--accent"); PAL.fault = col("--fault");
+      const fl = col("--line-strong");
+      for (let q = 0; q < FS * FS; q++) { fcol[q * 3] = fl.r; fcol[q * 3 + 1] = fl.g; fcol[q * 3 + 2] = fl.b; }
+      fColor.needsUpdate = true;
+      dirty = true;
+    }
+
+    // Per-frame visual state.
+    const fx = new Float32Array(CAP);
+    const fxColor = Array.from({ length: CAP }, () => new THREE.Color());
+
+    function writeDots() {
+      let p = 0;
+      for (let f = 0; f < CAP; f++) {
+        const fr = cache.frames[f];
+        const base = fr.page === -1 ? PAL.muted : fr.pf ? PAL.accent : PAL.ink2;
+        const baseA = fr.page === -1 ? 0.18 : fr.pf ? 0.95 : 0.5;
+        const lit = Math.ceil(fx[f] * (LAYERS - 1));
+        for (let l = 0; l < LAYERS; l++) {
+          let c = base, a = 0;
+          if (l === 0) { a = baseA; }
+          else if (l <= lit) { c = fxColor[f]; a = fx[f] * (1 - (l - 1) / LAYERS) * 0.95; }
+          else if (l === 1 && fr.pf) { c = PAL.accent; a = 0.4; }
+          for (let d = 0; d < DOTS * DOTS; d++, p++) {
+            colr[p * 3] = c.r; colr[p * 3 + 1] = c.g; colr[p * 3 + 2] = c.b; alph[p] = a;
+          }
+        }
+      }
+      aColor.needsUpdate = true; aAlpha.needsUpdate = true;
+    }
+
+    /* Camera: slow orbit, drag to look around. */
+    let theta = Math.PI * 0.22, phi = 0.92, radius = 17.5;
+    let dragging = false, lastX = 0, lastY = 0, autoOrbit = !reduce, dirty = true;
+    function placeCamera() {
+      camera.position.set(radius * Math.sin(phi) * Math.sin(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.cos(theta));
+      camera.lookAt(0, 0.3, 0);
+    }
+    canvas.addEventListener("pointerdown", (e) => {
+      dragging = true; autoOrbit = false; lastX = e.clientX; lastY = e.clientY;
+      canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      theta -= (e.clientX - lastX) * 0.006;
+      phi = Math.max(0.35, Math.min(1.35, phi - (e.clientY - lastY) * 0.005));
+      lastX = e.clientX; lastY = e.clientY; dirty = true;
+    });
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false; canvas.classList.remove("dragging");
+      if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+
+    function resize() {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h; camera.updateProjectionMatrix();
+      const scale = (h * renderer.getPixelRatio()) / (2 * Math.tan((camera.fov * Math.PI) / 360));
+      frameMat.uniforms.uScale.value = scale; floorMat.uniforms.uScale.value = scale;
+      dirty = true;
+    }
+    new ResizeObserver(resize).observe(canvas);
+
+    let visible = true;
+    new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; }).observe(canvas);
+
+    /* Simulation state and controls. */
+    let policy = "AMPP", wlKey = "loop", cache = new Cache(CAP), trace, rng, playing = !reduce, speed = 3;
+    const chipsEl = document.getElementById("chips");
+    const recent = [];
+
+    function nextPage() {
+      const p = trace.kind === "random" ? rng() % trace.fp : trace.i % trace.fp;
+      trace.i++;
+      return p;
+    }
+    function tick(silent) {
+      const page = nextPage();
+      const r = cache.step(page, policy, wlKey, trace.fp);
+      if (silent) return;
+      fx[r.demand] = 1;
+      fxColor[r.demand].copy(r.outcome === "hit" ? PAL.ink : PAL.fault);
+      for (const i of r.prefetched) { fx[i] = Math.max(fx[i], 0.6); fxColor[i].copy(PAL.accent); }
+      recent.push({ page, cls: r.outcome === "fault" ? "fault" : r.servedByPrefetch ? "pf" : "" });
+      if (recent.length > 28) recent.shift();
+    }
+    function reset() {
+      cache = new Cache(CAP);
+      rng = makeLCG(1234);
+      trace = { i: 0, kind: wlKey, fp: WL[wlKey].fp };
+      fx.fill(0); recent.length = 0;
+      // Warm the cache so the view opens in a running state, then count from zero.
+      for (let i = 0; i < 400; i++) tick(true);
+      cache.resetCounters();
+      renderHud(); renderChips(); dirty = true;
+    }
+    function renderHud() {
+      const rate = cache.accesses ? (cache.hits / cache.accesses) * 100 : 0;
+      document.getElementById("h-rate").textContent = rate.toFixed(1);
+      document.getElementById("h-fault").textContent = fmt(cache.faults);
+      document.getElementById("h-acc").textContent = fmt(cache.accesses);
+      document.getElementById("h-policy").textContent = policy;
+      document.getElementById("h-wl").textContent = WL[wlKey].label;
+      document.getElementById("h-pf").textContent = policy === "LRU" ? "never" : wlKey === "random" ? "off" : "on";
+    }
+    function renderChips() {
+      const frag = document.createDocumentFragment();
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const s = document.createElement("span");
+        s.className = "chip " + recent[i].cls; s.textContent = recent[i].page;
+        frag.appendChild(s);
+      }
+      chipsEl.replaceChildren(frag);
+    }
+
+    const playBtn = document.getElementById("play"), playIcon = document.getElementById("play-icon");
+    function setPlaying(p) {
+      playing = p;
+      playIcon.innerHTML = p ? ICONS.pause : ICONS.play;
+      playBtn.setAttribute("aria-label", p ? "Pause simulation" : "Play simulation");
+    }
+    playBtn.addEventListener("click", () => setPlaying(!playing));
+
+    const compare = document.getElementById("compare");
+    compare.addEventListener("click", () => {
+      policy = policy === "AMPP" ? "LRU" : "AMPP";
+      compare.textContent = policy === "LRU" ? "Back to AMPP" : "Compare with LRU";
+      compare.setAttribute("aria-pressed", String(policy === "LRU"));
+      if (!playing && !reduce) setPlaying(true);
+      reset();
+    });
+    document.getElementById("seg-wl").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      wlKey = b.dataset.wl;
+      document.querySelectorAll("#seg-wl button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      reset();
+    });
+    const speedEl = document.getElementById("speed");
+    speedEl.addEventListener("input", () => { speed = +speedEl.value; document.getElementById("speed-out").textContent = speed + "x"; });
+
+    /* Main loop: simulation ticks are decoupled from rendering. */
+    let last = performance.now(), acc = 0, hudClock = 0;
+    const TICKS_PER_SEC = 4;
+    function frame(now) {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+      if (visible) {
+        let stepped = false;
+        if (playing) {
+          acc += dt * TICKS_PER_SEC * speed;
+          for (let s = 0; acc >= 1 && s < 40; s++) { tick(false); acc -= 1; stepped = true; }
+        }
+        if (autoOrbit && !dragging) theta += dt * 0.1;
+        const decay = Math.pow(0.02, dt);
+        let pulsing = false;
+        for (let f = 0; f < CAP; f++) { if (fx[f] > 0.002) { fx[f] *= decay; pulsing = true; } else fx[f] = 0; }
+        if (stepped) {
+          hudClock += dt;
+          if (hudClock > 0.08) { renderHud(); renderChips(); hudClock = 0; }
+        }
+        if (dirty || stepped || pulsing || autoOrbit || dragging) {
+          writeDots(); placeCamera(); renderer.render(scene, camera); dirty = false;
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+
+    onThemeChange = refreshPalette;
+    refreshPalette();
+    resize();
+    reset();
+    setPlaying(!reduce);
+    writeDots(); placeCamera(); renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  })();
+</script>

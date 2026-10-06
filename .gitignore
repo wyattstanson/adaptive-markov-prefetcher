@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+c/ampp
+
+# Team-internal: review deck with speaker notes, and Q&A rehearsal notes
+presentation/
+docs/PRESENTING.md

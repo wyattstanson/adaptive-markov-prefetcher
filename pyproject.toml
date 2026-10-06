@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ampp"
+version = "1.0.0"
+description = "Adaptive Markov Page Prefetcher with Pressure-Aware Eviction"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Aryansh" },
+    { name = "Sreevatsa" },
+    { name = "Maheep" },
+]
+# Standard library only -- no third-party runtime dependencies by design, so the
+# whole policy stays lightweight and explainable.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+ampp = "ampp.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
